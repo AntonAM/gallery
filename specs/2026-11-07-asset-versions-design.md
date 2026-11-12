@@ -21,9 +21,8 @@ it only when the photo already has everything that file has.
 
 Status of this first version: the model, automatic detection (RAW with its camera file; exported edits with XMP
 lineage), the photo's picture from its newest edit, listing, previews and download for everyone who sees the photo,
-the decisions in the log, admin settings, the Versions job, the revert path, undoing versions, web UI. Not
-yet: the app's Versions list (the next change), phone edits as versions, C2PA lineage, face boxes that follow an
-edit's crop (see [Later](#later)).
+the decisions in the log, admin settings, the Versions job, the revert path, undoing versions, web and app UI. Not
+yet: phone edits as versions, C2PA lineage, face boxes that follow an edit's crop (see [Later](#later)).
 
 ## Why not stacks
 
@@ -473,9 +472,6 @@ Jobs page.
 
 No sync stream, no new sync payload: clients fetch versions on demand. A newer client asks an older server and gets
 404, which it reads as "no versions".
-
-What this section and the next say about the app (its Versions list, its download, the times it shows) describes
-the next change, which adds the app's part; this one has the server and the web.
 
 Both clients list the versions, show one larger and download its file. The mobile download hands the version's
 `/original` address to the app's own downloader, in its image group (`AssetVersionDownloader`): the app then shows

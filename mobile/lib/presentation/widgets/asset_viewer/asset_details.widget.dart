@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/gallery/versions/asset_versions_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/appears_in_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/asset_owner_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/date_time_details.widget.dart';
@@ -48,6 +49,7 @@ class AssetDetails extends ConsumerWidget {
             AssetOwnerDetails(asset: asset),
             SheetAssetDescription(asset: asset, exifInfo: exifInfo),
             PeopleDetails(asset: asset),
+            AssetVersionsDetails(asset: asset, exifInfo: exifInfo),
             LocationDetails(asset: asset, exifInfo: exifInfo),
             TechnicalDetails(asset: asset, exifInfo: exifInfo),
             RatingDetails(exifInfo: exifInfo),

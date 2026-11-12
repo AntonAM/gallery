@@ -118,7 +118,8 @@ the photo's own included, each with its thumbnail, what it is (**Edit**, **Origi
 HEIC, **RAW**), its format, size and date. The file the photo's picture comes from is marked **Shown**. Edits come
 first, newest on top, then the original, then the RAW. Select a thumbnail to see it larger, or download the file. On
 the web, holding the mouse over a thumbnail shows that version beside the panel, over the photo, so you can compare
-the versions by moving down the list.
+the versions by moving down the list. In the mobile app, the section is in the photo's details, and a downloaded file
+is saved to the phone's gallery.
 
 Everyone who can see the photo can see its versions: you, your partners, the members of the albums and Spaces the
 photo is in, and people with a shared link to it. Downloading a version follows the photo: a shared link that does

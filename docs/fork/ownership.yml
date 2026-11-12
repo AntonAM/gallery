@@ -215,6 +215,8 @@ features:
       - web/src/lib/gallery/versions/**
       - web/src/lib/gallery/admin/AssetVersionsSettings.svelte
       - web/src/lib/gallery/admin/AssetVersionsSettings.spec.ts
+      - mobile/lib/gallery/versions/**
+      - mobile/test/gallery/versions/**
       - docs/docs/features/asset-versions.md
       - specs/2026-11-07-asset-versions-design.md
       - server/test/medium/specs/repositories/data-saver-video.repository.spec.ts
@@ -307,6 +309,7 @@ features:
       - e2e/src/specs/server/api/server.e2e-spec.ts
       - docs/docs/administration/jobs-workers.md
       - docs/docs/install/config-file.md
+      - mobile/lib/presentation/widgets/asset_viewer/asset_details.widget.dart
     expected_symbols:
       server/src/services/job.service.ts:
         - isSkippedOnS3

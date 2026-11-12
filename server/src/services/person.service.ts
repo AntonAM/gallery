@@ -42,6 +42,7 @@ import {
 import { FaceIdentityMaintenanceService } from 'src/gallery/services/face-identity-maintenance.service.js';
 import { requireThumbnailAccess } from 'src/gallery/services/gallery-people.service.js';
 import { requireAssetEditAccess } from 'src/gallery/utils/access-grants.js';
+import { inShownPicture, shownEditAsset, shownEdits } from 'src/gallery/utils/asset-version-look.js';
 import { crossOwnerMergeAuthorizer, resolveMinimumFaceCount } from 'src/gallery/utils/people-config.js';
 import { updatePersonWithType } from 'src/gallery/utils/person-type.js';
 import { BoundingBox } from 'src/repositories/machine-learning.repository.js';
@@ -232,13 +233,20 @@ export class PersonService extends BaseService {
     const faces = await this.personRepository.getFaces(dto.id, { viewingUserId: auth.user.id, isVisible: true });
     const asset = await this.assetRepository.getForFaces(dto.id);
     const assetDimensions = getDimensions(asset);
+    // Gallery: on a photo that shows an edit, the boxes follow it (src/gallery/utils/asset-version-look.ts)
+    const edits = await shownEdits(this.assetVersionRepository, dto.id, asset.edits, assetDimensions);
 
     // A person the owner marked hidden must never reach another viewer (#796). Filtering on the
     // client would be cosmetic — the identity would still be on the wire — so drop the face here.
     // The owner keeps seeing their hidden people; the web decides whether to display them.
-    const response = faces
-      .filter((face) => !face.person?.isHidden || face.person?.ownerId === auth.user.id)
-      .map((face) => mapFaces(face, asset.edits, assetDimensions));
+    // Gallery: a face that an edit made elsewhere cut out of the shown picture gets no box (inShownPicture)
+    const response = inShownPicture(
+      faces
+        .filter((face) => !face.person?.isHidden || face.person?.ownerId === auth.user.id)
+        .map((face) => mapFaces(face, edits, assetDimensions)),
+      asset.edits,
+      edits,
+    );
 
     // #808: a name or birthday set inside a shared space lives on `shared_space_person` and is
     // resolved at read time — it is never written back to `person`. The asset viewer Info panel
@@ -1041,7 +1049,9 @@ export class PersonService extends BaseService {
     // the coordinates received from the client are based on the edited preview image; convert
     // them to the coordinate space of the original unedited image. Shared with the space
     // face-assign endpoint (SharedSpaceService.createSpaceAssetFace) so the two can never drift.
-    const { topLeft, bottomRight, imageWidth, imageHeight } = convertFaceBoxToOriginalImageSpace(dto, asset);
+    // Gallery: a box drawn on a shown edit goes back to its place on the photo's own picture
+    const drawnOn = await shownEditAsset(this.assetVersionRepository, asset);
+    const { topLeft, bottomRight, imageWidth, imageHeight } = convertFaceBoxToOriginalImageSpace(dto, drawnOn);
 
     const faceId = await this.personRepository.createAssetFace({
       personGroupId: person.personGroupId,

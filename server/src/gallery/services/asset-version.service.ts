@@ -17,6 +17,12 @@ import { AssetVersionResponseDto, AssetVersionsResponseDto } from 'src/gallery/d
 import { NAME_SEARCH_LIMIT, type StoredRead } from 'src/gallery/repositories/asset-version.repository.js';
 import { applyVisibilityTransitionSideEffects } from 'src/gallery/services/asset-visibility-transition.service.js';
 import { readOf, shouldLook, toLinkInput, usableTimeMatches } from 'src/gallery/utils/asset-version-candidates.js';
+import {
+  fitPlacement,
+  pairFaces,
+  type PlacementResult,
+  type Size,
+} from 'src/gallery/utils/asset-version-face-placement.js';
 import { desiredLook, isLookCurrent, photoKind } from 'src/gallery/utils/asset-version-look.js';
 import { searchNames } from 'src/gallery/utils/asset-version-names.js';
 import {
@@ -39,8 +45,10 @@ import {
 import type { ArgOf } from 'src/repositories/event.repository.js';
 import { BaseService } from 'src/services/base.service.js';
 import type { JobItem, JobOf } from 'src/types.js';
+import { getDimensions } from 'src/utils/asset.util.js';
 import type { ImmichMediaResponse } from 'src/utils/file.js';
 import { mimeTypes } from 'src/utils/mime-types.js';
+import { isFacialRecognitionEnabled } from 'src/utils/misc.js';
 
 /** Jobs that delete assets without an AssetDelete event per asset, after which the cleanup runs. */
 const CLEANUP_AFTER = new Set<JobName>([JobName.LibraryRemoveAsset, JobName.LibraryDelete, JobName.AssetDeleteCheck]);
@@ -251,6 +259,16 @@ export class AssetVersionService extends BaseService {
     // queued again for ever; the next detection of the shot, or the cleanup, tries again
     if (job.name === JobName.AssetEditThumbnailGeneration && response !== JobStatus.Failed) {
       await this.refreshLook(job.data.id, true);
+    }
+    // the faces of a photo that shows an edit are put where they are on that picture: once the picture is rendered
+    // (by the edit job, or by the thumbnail job, which renders it too), and again whenever the photo's faces are found
+    // (the two arrive in either order)
+    const placesFaces =
+      (job.name === JobName.AssetEditThumbnailGeneration && response !== JobStatus.Failed) ||
+      (job.name === JobName.AssetGenerateThumbnails && response === JobStatus.Success) ||
+      (job.name === JobName.AssetDetectFaces && response === JobStatus.Success);
+    if (placesFaces && (await this.assetVersionRepository.hasLook(job.data.id))) {
+      await this.jobRepository.queue({ name: JobName.AssetVersionPlaceFaces, data: { id: job.data.id } });
     }
   }
 
@@ -826,6 +844,91 @@ export class AssetVersionService extends BaseService {
       this.logger.warn(`Versions: could not read the sidecar of asset ${assetId} with ExifTool: ${error}`);
       return [];
     }
+  }
+
+  /**
+  Puts the face boxes of a photo that shows an edit where the faces are on that picture: an edit is often cropped
+  or straightened, and the boxes were found on the photo's own file. The steps, in order:
+  1. the photo and the picture it shows; 2. where that picture sits on the photo (`findPlacement`, below);
+  3. store it, for Gallery's box transforms to use (asset-version-look.ts: `shownEdits`). Nothing else is written:
+  no face is hidden or moved. A face the edit cut out simply gets no box while the edit shows (`inShownPicture`).
+  */
+  @OnJob({ name: JobName.AssetVersionPlaceFaces, queue: QueueName.AssetVersions })
+  async handlePlaceFaces({ id }: JobOf<JobName.AssetVersionPlaceFaces>): Promise<JobStatus> {
+    const { machineLearning } = await this.getConfig({ withCache: true });
+    if (!isFacialRecognitionEnabled(machineLearning)) {
+      return JobStatus.Skipped;
+    }
+    // while Gallery's own editor has changed the photo, its picture is made from its own file, not from the edit
+    const look = await this.assetVersionRepository.getLookForPlacement(id);
+    if (!look || !look.sourceAssetId || !look.sourceModifiedAt || look.hasEditorEdits) {
+      return JobStatus.Skipped;
+    }
+    const photo = getDimensions(look);
+
+    const found = await this.findPlacement(id, photo, look, machineLearning.facialRecognition);
+    this.logger.debug(
+      found.placement
+        ? `Photo ${id}: its faces are placed on the edit it shows (${JSON.stringify(found.placement)})`
+        : `Photo ${id}: its face boxes stay as they are: ${found.reason}`,
+    );
+    if (!found.placement && !look.placement) {
+      return JobStatus.Success;
+    }
+
+    // a picture rendered again in the meantime is left to the job queued after that render
+    const stored = await this.assetVersionRepository.setPlacement(id, look.revision, found.placement);
+    return stored ? JobStatus.Success : JobStatus.Skipped;
+  }
+
+  /**
+  Where the picture a photo shows sits on the photo's own picture, from the faces on both (or none, and why):
+  1. the photo's faces; 2. the faces on the shown picture, found by the same call the face job makes (nothing about
+  them is stored); 3. pair them, by Gallery's own measure of "the same person"; 4. fit (pure:
+  asset-version-face-placement.ts), which keeps nothing when the boxes already sit on their faces. The sizes of the
+  two pictures are no shortcut: a crop exported back at the camera's resolution, or a picture turned upside down, has
+  the photo's size and another frame (decided 2026-11-13, after astra-15).
+  
+  In step 2 a face may be half as sure a find as the face job asks for. A face of the photo is often found a
+  little less surely on the edit (it is smaller there, or turned), and a find that is no face does no harm: only
+  one that is also recognised as a face of the photo is used.
+  */
+  private async findPlacement(
+    photoId: string,
+    photo: Size,
+    look: { width: number | null; height: number | null; previewPath: string | null },
+    settings: { modelName: string; minScore: number; maxDistance: number },
+  ): Promise<PlacementResult> {
+    const none = (reason: string): PlacementResult => ({ placement: null, reason });
+    if (!photo.width || !photo.height || !look.width || !look.height) {
+      return none('a size is not known');
+    }
+    const faces = await this.assetVersionRepository.getFacesWithVectors(photoId);
+    if (faces.length === 0) {
+      return none('the photo has no faces');
+    }
+    if (!look.previewPath) {
+      return none('the edit has no preview yet');
+    }
+    const detected = await this.machineLearningRepository.detectFaces(look.previewPath, {
+      ...settings,
+      minScore: settings.minScore / 2,
+    });
+    const pairs = pairFaces(
+      // each box in the pixels of the photo's upright frame, whatever preview it was found on
+      faces.map((face) => ({
+        box: {
+          x1: (face.boundingBoxX1 * photo.width) / face.imageWidth,
+          y1: (face.boundingBoxY1 * photo.height) / face.imageHeight,
+          x2: (face.boundingBoxX2 * photo.width) / face.imageWidth,
+          y2: (face.boundingBoxY2 * photo.height) / face.imageHeight,
+        },
+        vector: JSON.parse(face.embedding) as number[],
+      })),
+      detected.faces.map((face) => ({ box: face.boundingBox, vector: JSON.parse(face.embedding) as number[] })),
+      1 - settings.maxDistance,
+    );
+    return fitPlacement(photo, { width: detected.imageWidth, height: detected.imageHeight }, pairs);
   }
 
   /** Phones and Space members drop the rows of assets that just went behind their photo (hidden). */

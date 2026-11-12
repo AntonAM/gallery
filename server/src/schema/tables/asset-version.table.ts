@@ -95,6 +95,15 @@ export class AssetVersionTable {
   @Column({ type: 'timestamp with time zone', nullable: true })
   lookQueuedAt!: Timestamp | null;
 
+  /**
+  Base photo only: where its rendered picture sits on its own (asset-version-face-placement.ts): `{x, y, width,
+  height}` as 0–1 of the photo's upright frame, and `angle` in degrees clockwise. Found from the faces on both
+  pictures, so that face and text boxes follow a cropped edit, for the render of `lookUpdatedAt`. Null when the two
+  show the same frame, or nothing could be told.
+  */
+  @Column({ type: 'jsonb', nullable: true })
+  placement!: { x: number; y: number; width: number; height: number; angle: number } | null;
+
   /** When a version's follow-up (phones and Space members drop the hidden file) last completed; null = pending. */
   @Column({ type: 'timestamp with time zone', nullable: true })
   syncedAt!: Timestamp | null;

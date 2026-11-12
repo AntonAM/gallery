@@ -480,6 +480,7 @@ ON CONFLICT DO NOTHING`.execute(this.db);
   `ImageAdjustRepository.upsert`. Under the photo's lock, which pairing and the reset take too. A photo whose row was
   removed meanwhile (an undo, then a reset that finished first) gets a row again: its files do hold that picture,
   and the next reset removes it.
+  Where the picture sits on the photo is not known for a new render: the placement is found again after it.
   */
   async setLook(
     assetId: string,
@@ -499,6 +500,7 @@ ON CONFLICT DO NOTHING`.execute(this.db);
         lookSourceModifiedAt: source.modifiedAt,
         lookUpdatedAt: sql<Date>`clock_timestamp()`,
         lookQueuedAt: null,
+        placement: null,
       };
       // a row made here (a render that finished after the reset removed it) has no file behind it: the cleanup finds
       // its look outdated and the reset removes it again, so what it says the photo is does not matter
@@ -530,7 +532,13 @@ ON CONFLICT DO NOTHING`.execute(this.db);
       }
       const cleared = await tx
         .updateTable('asset_version')
-        .set({ lookSourceAssetId: null, lookSourceModifiedAt: null, lookUpdatedAt: null, lookQueuedAt: null })
+        .set({
+          lookSourceAssetId: null,
+          lookSourceModifiedAt: null,
+          lookUpdatedAt: null,
+          lookQueuedAt: null,
+          placement: null,
+        })
         .where('versionAssetId', '=', asUuid(assetId))
         .where('role', '=', 'base_photo')
         .where('lookUpdatedAt', 'is not', null)
@@ -547,6 +555,118 @@ WHERE "id" = ${assetId}::uuid AND "isEdited"
   AND NOT EXISTS (SELECT 1 FROM "asset_video_trim" t WHERE t."assetId" = "asset"."id")`.execute(tx);
       return 'cleared';
     });
+  }
+
+  /** Whether the base photo's picture is rendered from another file. */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async hasLook(photoId: string): Promise<boolean> {
+    const row = await this.db
+      .selectFrom('asset_version')
+      .select('versionAssetId')
+      .where('versionAssetId', '=', asUuid(photoId))
+      .where('role', '=', 'base_photo')
+      .where('lookUpdatedAt', 'is not', null)
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /**
+  For placing a photo's face boxes on the edit it shows (asset-version-face-placement.ts): the photo's own frame,
+  the rendered picture's resolution (the photo's `width` and `height` while it shows an edit) and preview, which
+  render it is, the placement stored for it, and whether Gallery's own editor has changed the photo (its edits
+  then make the picture, not the look).
+  */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getLookForPlacement(photoId: string) {
+    return this.db
+      .selectFrom('asset_version as look')
+      .innerJoin('asset', 'asset.id', 'look.versionAssetId')
+      .innerJoin('asset_exif as exif', 'exif.assetId', 'asset.id')
+      .leftJoin('asset_file as preview', (join) =>
+        join
+          .onRef('preview.assetId', '=', 'asset.id')
+          .on('preview.type', '=', sql.lit(AssetFileType.Preview))
+          .on('preview.isEdited', '=', sql.lit(true)),
+      )
+      .select([
+        'asset.ownerId',
+        'asset.width',
+        'asset.height',
+        'exif.exifImageWidth',
+        'exif.exifImageHeight',
+        'exif.orientation',
+        'look.lookSourceAssetId as sourceAssetId',
+        'look.lookSourceModifiedAt as sourceModifiedAt',
+        'look.placement',
+        // which render this is (`setLook` stamps each one), to the microsecond
+        sql<string>`"look"."lookUpdatedAt"::text`.as('revision'),
+        'preview.path as previewPath',
+        sql<boolean>`exists (select 1 from "asset_edit" "e" where "e"."assetId" = "asset"."id")`.as('hasEditorEdits'),
+      ])
+      .where('look.versionAssetId', '=', asUuid(photoId))
+      .where('look.role', '=', 'base_photo')
+      .where('look.lookUpdatedAt', 'is not', null)
+      .executeTakeFirst();
+  }
+
+  /** The photo's faces that can be recognised again on another picture: each box with its recognition vector. */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getFacesWithVectors(photoId: string) {
+    return this.db
+      .selectFrom('asset_face as face')
+      .innerJoin('face_search as search', 'search.faceId', 'face.id')
+      .select([
+        'face.id',
+        'face.boundingBoxX1',
+        'face.boundingBoxY1',
+        'face.boundingBoxX2',
+        'face.boundingBoxY2',
+        'face.imageWidth',
+        'face.imageHeight',
+        'search.embedding',
+      ])
+      .where('face.assetId', '=', asUuid(photoId))
+      .where('face.deletedAt', 'is', null)
+      .execute();
+  }
+
+  /**
+  Stores where the photo's rendered picture sits on its own (or that nothing is known), for the render it was found
+  on (`revision`, from `getLookForPlacement`): a picture rendered again since then, from the same file or another,
+  is left alone and gets its own. Returns whether it was stored.
+  */
+  async setPlacement(
+    photoId: string,
+    revision: string,
+    placement: { x: number; y: number; width: number; height: number; angle: number } | null,
+  ): Promise<boolean> {
+    const updated = await this.db
+      .updateTable('asset_version')
+      .set({ placement })
+      .where('versionAssetId', '=', asUuid(photoId))
+      .where('role', '=', 'base_photo')
+      .where(sql<boolean>`"lookUpdatedAt"::text = ${revision}`)
+      .returning('versionAssetId')
+      .executeTakeFirst();
+    return !!updated;
+  }
+
+  /**
+  Where the picture a photo shows sits on the photo's own, if that is known and it is the picture shown: Gallery's
+  own edits, while a photo has any, make its picture from its own file.
+  */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getShownPlacement(photoId: string) {
+    const row = await this.db
+      .selectFrom('asset_version as look')
+      .select('look.placement')
+      .where('look.versionAssetId', '=', asUuid(photoId))
+      .where('look.role', '=', 'base_photo')
+      .where('look.lookUpdatedAt', 'is not', null)
+      .where('look.placement', 'is not', null)
+      .where(sql<boolean>`not exists (select 1 from "asset_edit" "e" where "e"."assetId" = "look"."versionAssetId")`)
+      .executeTakeFirst();
+    return row?.placement ?? null;
   }
 
   /**

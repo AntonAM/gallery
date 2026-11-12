@@ -1,11 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
+import { type AssetEditActionItem } from 'src/dtos/editing.dto.js';
 import { AssetType } from 'src/enum.js';
 import type { AssetVersionRepository } from 'src/gallery/repositories/asset-version.repository.js';
+import { isInPicture, placementEdits, type ShownBox } from 'src/gallery/utils/asset-version-face-placement.js';
 import { hasEditMark } from 'src/gallery/utils/asset-version-names.js';
 import { chooseLook, kindOf, type VersionKind } from 'src/gallery/utils/asset-version-rules.js';
 import type { BackendMediaServer } from 'src/gallery/utils/backend-media-server.js';
 import type { AssetJobRepository } from 'src/repositories/asset-job.repository.js';
+import { getDimensions } from 'src/utils/asset.util.js';
 import { mimeTypes } from 'src/utils/mime-types.js';
+import { getOutputDimensions } from 'src/utils/transform.js';
 
 // The picture of a photo that has versions (specs/2026-11-07-asset-versions-design.md): the photo keeps its id and its
 // own file, and its edited thumbnail, preview and full-size image are rendered from its newest edit, another file of
@@ -155,3 +159,63 @@ export const withLookPublished = <T extends { fullsizeDimensions?: { width: numb
   published: ((dimensions?: { width: number; height: number }) => Promise<void>) | undefined,
 ): (T & { published?: () => Promise<void> }) | undefined =>
   generated && { ...generated, published: published && (() => published(generated.fullsizeDimensions)) };
+
+/**
+The edits a photo's face and text boxes go through before they are shown: its own (made in Gallery's editor), or,
+for a photo that shows an edit made elsewhere, where that picture sits on the photo, as a crop and a turn
+(asset-version-face-placement.ts). A photo that shows its own file, or an edit placed like the photo, has none.
+`dimensions`: the photo's own upright frame. Without the repository (a service put together without the fork's,
+as Immich's own tests do) there are no versions, and the photo's own edits are all there is.
+*/
+export const shownEdits = async (
+  repository: Pick<AssetVersionRepository, 'getShownPlacement'> | undefined,
+  photoId: string,
+  edits: AssetEditActionItem[] | null | undefined,
+  dimensions: { width: number; height: number },
+): Promise<AssetEditActionItem[]> => {
+  if ((edits && edits.length > 0) || !dimensions.width || !dimensions.height) {
+    return edits ?? [];
+  }
+  const placement = await repository?.getShownPlacement(photoId);
+  return placement ? placementEdits(placement, dimensions) : [];
+};
+
+/**
+Of a photo's boxes as they are shown (`shown`: what `shownEdits` gave), the ones to draw. On a photo that shows an
+edit made elsewhere, a face the edit cut out lands outside the picture and gets no box; it stays on the photo. Any
+other photo's boxes are returned as they are: Gallery's own editor hides what it crops out itself.
+*/
+export const inShownPicture = <T extends ShownBox>(
+  boxes: T[],
+  ownEdits: AssetEditActionItem[] | null | undefined,
+  shown: AssetEditActionItem[],
+): T[] => ((ownEdits && ownEdits.length > 0) || shown.length === 0 ? boxes : boxes.filter((box) => isInPicture(box)));
+
+/**
+The photo as a box drawn by hand is converted from (`convertFaceBoxToOriginalImageSpace`): itself, or, while it
+shows an edit placed on it, with that placement as its edits and the frame they end in as its size. The
+conversion scales the drawn box by the photo's size, which is the edit's resolution while the edit shows; the
+placement is in the pixels of the photo's own frame.
+*/
+export const shownEditAsset = async <
+  T extends {
+    id: string;
+    edits?: AssetEditActionItem[] | null;
+    exifInfo?: { exifImageWidth: number | null; exifImageHeight: number | null; orientation: string | null } | null;
+  },
+>(
+  repository: Pick<AssetVersionRepository, 'getShownPlacement'> | undefined,
+  asset: T,
+): Promise<T> => {
+  if (!asset.exifInfo || (asset.edits && asset.edits.length > 0)) {
+    return asset;
+  }
+  const dimensions = getDimensions(asset.exifInfo);
+  const edits = await shownEdits(repository, asset.id, asset.edits, dimensions);
+  if (edits.length === 0) {
+    return asset;
+  }
+  // the frame those edits end in, in the photo's pixels (a picture turned on its side swaps its sides)
+  const { width, height } = getOutputDimensions(edits, dimensions);
+  return { ...asset, edits, width, height };
+};

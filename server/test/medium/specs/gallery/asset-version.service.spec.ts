@@ -51,6 +51,7 @@ import { UserRepository } from 'src/repositories/user.repository.js';
 import { WebsocketRepository } from 'src/repositories/websocket.repository.js';
 import { DB } from 'src/schema/index.js';
 import { down } from 'src/schema/migrations-gallery/1800100000000-AddAssetVersionTables.js';
+import { down as downPlacement } from 'src/schema/migrations-gallery/1800200000000-AddAssetVersionLookPlacement.js';
 import { checkAccess } from 'src/utils/access.js';
 import { clearConfigCache } from 'src/utils/config.js';
 import { MediumTestContext, newMediumService } from 'test/medium.factory.js';
@@ -2570,6 +2571,8 @@ describe(AssetVersionService.name, () => {
       const rollback = new Error('rollback');
       await expect(
         defaultDatabase.transaction().execute(async (tx) => {
+          // the newest migration first, as a downgrade runs them: the placement goes, then versions
+          await downPlacement(tx as never);
           await down(tx as never);
           const rows = await tx
             .selectFrom('asset')

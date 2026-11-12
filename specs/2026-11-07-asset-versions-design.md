@@ -21,8 +21,8 @@ it only when the photo already has everything that file has.
 
 Status of this first version: the model, automatic detection (RAW with its camera file; exported edits with XMP
 lineage), the photo's picture from its newest edit, listing, previews and download for everyone who sees the photo,
-the decisions in the log, admin settings, the Versions job, the revert path, undoing versions, web and app UI. Not
-yet: phone edits as versions, C2PA lineage, face boxes that follow an edit's crop (see [Later](#later)).
+the decisions in the log, admin settings, the Versions job, the revert path, undoing versions, web and app UI, face
+boxes that follow a cropped edit. Not yet: phone edits as versions, C2PA lineage (see [Later](#later)).
 
 ## Why not stacks
 
@@ -138,8 +138,8 @@ picture. The next detection of the shot and the Versions job also try again.
 would be editing another picture than the one on screen, and saving would replace the edit they see, so
 `AssetService.editAsset` refuses it (`requireOwnPicture`, one call; decided 2026-11-10, after a review).
 Removing edits stays allowed. A crop made before the photo had an edit to show wins while it exists, and the look
-comes back when it is removed. A colour adjustment has no geometry and applies on top of the look. Face and OCR boxes are detected on the photo's own file, so they can sit off when the
-shown edit is cropped differently.
+comes back when it is removed. A colour adjustment has no geometry and applies on top of the look. Face and text boxes are found on the photo's
+own file and follow the shown edit: see [Face boxes on a shown edit](#face-boxes-on-a-shown-edit).
 
 There is no reverse step. Nothing makes a version a photo of its own again, and the photo of a shot never changes.
 
@@ -170,6 +170,72 @@ file has a candidate of the same shot and is left apart, that is logged with the
 a job decides so (decided 2026-11-13: a file that is not combined has no row to keep it). A file with nothing to
 combine with is not logged, so the log is not filled with them; nor are files that only look close and are different
 shots (burst frames, files of other names taken at the same time).
+
+### Face boxes on a shown edit
+
+Faces are found on the photo's own file, and their boxes are kept in that picture's pixels (Immich's rule for every
+edited photo). An edit made elsewhere is often cropped or straightened, so over its picture the boxes would sit in the
+wrong place. The edit's file is not asked how it was cropped: of the exports of more than 30 editors looked at (2026-11-12),
+only Adobe's (`crs:` crop corners and angle) and digiKam's (`ImageHistory`) record a crop that can be read, darktable
+records it in its own packed module settings, and the others record nothing. The faces are asked instead (decided
+2026-11-12): they are found once more on the edit's picture, and the one thing kept is where that picture
+sits on the photo.
+
+The job `AssetVersionPlaceFaces` (queue `assetVersions`) runs for a photo with a look after its picture has been
+rendered (by the edit job, or by the thumbnail job, which renders it too), and after the face job has found its faces
+(the two arrive in either order):
+
+1. Nothing is looked for when the photo has no faces, or while Gallery's own editor has changed the photo (its
+   picture is then made from its own file). The sizes of the two pictures are no shortcut: a crop exported back at
+   the camera's resolution, or a picture turned upside down, has the photo's size and another frame (decided
+   2026-11-13, after astra-15; step 4 finds an unchanged frame from the faces themselves).
+2. The faces on the edited preview are found by the same call the face job makes (`detectFaces`), at half its
+   lowest score: a face of the photo is often found a little less surely on the edit, and a find that is no face
+   does no harm, because only one that is also recognised as a face of the photo is used. Nothing about them is
+   stored.
+3. Each is paired with the same face on the photo by their recognition vectors, the most alike first and each face
+   once, by Gallery's own measure of "the same person" (`facialRecognition.maxDistance`).
+4. `fitPlacement` (pure, `asset-version-face-placement.ts`) fits where the edit sits on the photo: one pair gives the
+   size and the position, two or more also the turn (least squares on the centres). It keeps nothing when the boxes
+   already sit on their faces as they are (the same frame at another resolution, a trim too small to see: every box
+   overlaps its face by 80% or more), and nothing that makes no sense: an edit that would show more than the photo
+   has, pairs that do not agree. Any turn is taken, a picture turned on its side included. Boxes otherwise stay as
+   they were.
+5. The placement (`placement` on the base photo's `asset_version` row: `x`, `y`, `width`, `height` as 0–1 of the
+   photo's upright frame, `angle` in degrees clockwise; a column of its own migration, whose `down()` drops it) is
+   stored for the render it was found on (`lookUpdatedAt`, which every render stamps), and every new render, and the
+   reset of the look, clears it.
+
+Nothing else is written. In particular **no face is hidden** (decided 2026-11-12, after a review): Immich's
+nightly cleanup deletes a person who has no visible face left, so hiding a face that an edit cut out could delete a
+person who is on that one photo only, and nothing would bring them back. A face the edit cut out gets no box while
+the edit shows (`inShownPicture`: at least half of the placed box must be in the picture, the share Immich asks
+after a crop in its own editor); it stays on the photo and in its person's list.
+
+Where boxes are shown, the placement stands in for the photo's edits as a crop and a turn (quarter turns first,
+which change the frame, then the rest, which Immich's transforms apply about the centre; `shownEdits`,
+`shownEditAsset` in `asset-version-look.ts`), so Immich's own transforms do the work: the face boxes of a photo
+(`PersonService.getFacesById`, and a Space's view of them), a box drawn by hand on the edit, which goes back to its
+place on the photo's own picture, and text boxes (`AssetService.getOcr`). Text cut out by the edit is not hidden and
+stays in search: the photo's own file has it. The two views that cut a face out of a preview (face suggestions) use
+the photo's own picture, where the box is.
+
+Limits, all of which leave the boxes as they were: no face found on both pictures (an edit that cuts every face
+out, or one turned so that its faces lie on their side, which the detector does not find); face recognition switched
+off. One face cannot tell a turn: its box still lands on it. A placement can also be wrong where the faces say too
+little: a mirrored edit with two faces reads as a half turn, and two faces close together give a turn a few degrees
+off. The paired faces' boxes still land on them; other boxes of that photo are then drawn off, or not at all, until
+it shows another picture. Since nothing but the placement is written, that is all a wrong one does. Immich draws a turned box upright from two of its
+corners, so on a straightened edit a box stays centred on its face and gets narrower and taller: hardly at 5
+degrees, visibly from about 10. No response changes shape, so every client pairing sees the same faces at the moved
+coordinates.
+
+Tried on a real detector (2026-11-12, a throwaway Gallery with `buffalo_l`): 20 photos of 1 to 10 faces, each with
+three edited copies cut out here, so the true crop was known (crops, other shapes and resolutions, straightened by 2
+and 5 degrees, turned by 12, 25 and 90, black and white, a face cut out). Of the 60, 47 were placed, 8 needed
+nothing (the same frame), and 5 could not be: three turned on their side, two that cut every face out. On the placed
+ones each box overlapped its face by 82% or more for crops and turns up to 5 degrees, and its centre was within a
+sixth of the face's width in every case.
 
 ## Detection
 
@@ -551,15 +617,18 @@ migrations.
 
 ## Upstream footprint (rule 5)
 
-A registration or a call each, a few lines at most: `enum.ts` (queue, four job names, one manual job name), `services/job.service.ts`
-(the manual job), `dtos/config.dto.ts` (job concurrency entry),
+A registration or a call each, a few lines at most: `enum.ts` (queue, five job names, one manual job name),
+`services/job.service.ts` (the manual job), `dtos/config.dto.ts` (job concurrency entry),
 `dtos/queue-legacy.dto.ts`, `services/queue.service.ts` (queue → job), `services/server.service.ts` (feature flag),
 `services/media.service.ts` (thumbnails for hidden versions; the look, beside the colour adjustment's in
-`generateEditedThumbnails`), `services/asset.service.ts` (the editor refused on a photo that shows an edit), `services/duplicate.service.ts`
-(shots with an edit left out of duplicate detection), `utils/access.ts` (a version reachable only as its photo is: one
-wrapped call, also for shared links), `repositories/access.repository.ts` (the fork's version lookup, mounted beside
-its other access classes), the web lines that mount the Versions section and the settings, plus tests that enumerate
-those lists and the access mock. Everything else is
+`generateEditedThumbnails`), `services/asset.service.ts` (the editor refused on a photo that shows an edit; text
+boxes follow the shown edit), `services/duplicate.service.ts` (shots with an edit left out of duplicate detection),
+`utils/access.ts` (a version reachable only as its photo is: one wrapped call, also for shared links),
+`repositories/access.repository.ts` (the fork's version lookup, mounted beside its other access classes), the web
+lines that mount the Versions section and the settings, plus tests that enumerate those lists and the access mock.
+Face boxes follow the shown edit in two places in each of two files the fork already owns (`services/person.service.ts`,
+`services/shared-space.service.ts`: where a photo's faces are read, and where a box drawn by hand is stored) and
+through one argument in `web/src/lib/components/faces-page/face-crop.svelte`. Everything else is
 in `src/gallery/`, `src/schema/tables/asset-version.table.ts`, two columns of `asset-job-status-gallery.table.ts`, `migrations-gallery/`,
 `web/src/lib/gallery/versions/`, `mobile/lib/gallery/versions/`, `i18n/gallery/`.
 
@@ -583,7 +652,8 @@ in `src/gallery/`, `src/schema/tables/asset-version.table.ts`, two columns of `a
   verified (Capture One, DxO, Affinity, Luminar, Apple and Google Photos); edits of one shot whose source is not in
   Gallery (two exports of a RAW kept elsewhere share an `OriginalDocumentID` but have no file to hang on); the edit
   date from inside the file (`History` `when`, `ModifyDate`) where file times were reset.
-- **Face and OCR boxes that follow an edit's crop** (Lightroom records it in `crs:` tags).
+- **The crop an editor recorded**, where there is one (Adobe's `crs:` tags, digiKam's `ImageHistory`): exact, and it
+  would place text boxes on a photo without faces. Today the placement comes from the faces alone.
 - **Phone edits that the app uploads over their original** as versions instead of upstream's stacking of edited
   re-uploads: they need a canonical parent and a durable retry protocol in the app. (An edited copy a phone saves as
   a file of its own is recognised by its name where the name is an edit's alone, an iPhone's `IMG_E1234.JPG`; a

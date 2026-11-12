@@ -69,6 +69,7 @@ import {
   UserAvatarColor,
 } from 'src/enum.js';
 import { requireSpaceShareAccess } from 'src/gallery/utils/access-grants.js';
+import { inShownPicture, shownEditAsset, shownEdits } from 'src/gallery/utils/asset-version-look.js';
 import {
   resolveSpaceMemberManagement,
   type ServerMemberPermissionSettings,
@@ -2392,15 +2393,16 @@ export class SharedSpaceService extends BaseService {
     }
 
     const asset = await this.assetRepository.getById(assetId, { edits: true, exifInfo: true });
-    const edits = asset?.edits ?? [];
     const dimensions = asset?.exifInfo ? getDimensions(asset.exifInfo) : { width: 0, height: 0 };
+    // on a photo that shows an edit, the boxes follow it (src/gallery/utils/asset-version-look.ts)
+    const edits = await shownEdits(this.assetVersionRepository, assetId, asset?.edits, dimensions);
     // `transformFaceBoundingBox` is already a no-op without edits; the dimension check is the one
     // extra guard, because an edited asset with no exif dimensions would otherwise scale every box
     // by zero and collapse it to a point. A stored box is wrong-but-recognisable there, a collapsed
     // one is not. The write twin refuses outright instead (F-17) — a read still has to render.
     const canProject = dimensions.width > 0 && dimensions.height > 0;
 
-    return faces.map((face) => {
+    const placed = faces.map((face) => {
       const box = {
         boundingBoxX1: face.boundingBoxX1,
         boundingBoxY1: face.boundingBoxY1,
@@ -2418,6 +2420,8 @@ export class SharedSpaceService extends BaseService {
         isEditorDrawn: face.isEditorDrawn,
       };
     });
+    // a face that an edit made elsewhere cut out of the shown picture gets no box
+    return inShownPicture(placed, asset?.edits, edits);
   }
 
   /**
@@ -2473,7 +2477,9 @@ export class SharedSpaceService extends BaseService {
       throw new ForbiddenException('Faces can only be drawn on photos from members of this space');
     }
 
-    const { topLeft, bottomRight, imageWidth, imageHeight } = convertFaceBoxToOriginalImageSpace(dto, asset);
+    // a box drawn on a shown edit goes back to its place on the photo's own picture
+    const drawnOn = await shownEditAsset(this.assetVersionRepository, asset);
+    const { topLeft, bottomRight, imageWidth, imageHeight } = convertFaceBoxToOriginalImageSpace(dto, drawnOn);
     const boundingBoxX1 = Math.round(topLeft.x);
     const boundingBoxY1 = Math.round(topLeft.y);
     const boundingBoxX2 = Math.round(bottomRight.x);

@@ -1,6 +1,7 @@
 import { OutputInfo } from 'sharp';
-import { AssetEditAction } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, type AssetEditActionItem } from 'src/dtos/editing.dto.js';
 import { AssetFileType } from 'src/enum.js';
+import { inShownPicture, shownEditAsset, shownEdits } from 'src/gallery/utils/asset-version-look.js';
 import { MediaService } from 'src/services/media.service.js';
 import type { RawImageInfo } from 'src/types.js';
 import { AssetFactory } from 'test/factories/asset.factory.js';
@@ -185,5 +186,96 @@ describe('MediaService (the picture of a photo with versions)', () => {
     expect(mocks.asset.deleteFiles).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ path: '/thumbs/preview_edited.jpeg' })]),
     );
+  });
+});
+
+/** A box as Gallery shows it, 100 wide, on a picture of 1000 x 800. */
+const box = (x1: number) => ({
+  boundingBoxX1: x1,
+  boundingBoxY1: 100,
+  boundingBoxX2: x1 + 100,
+  boundingBoxY2: 200,
+  imageWidth: 1000,
+  imageHeight: 800,
+});
+
+// Where a photo's face and text boxes are shown: through its own edits, or through the place of the edit it shows.
+describe('the edits a photo’s boxes go through (shownEdits, shownEditAsset)', () => {
+  const frame = { width: 6000, height: 4000 };
+  const placement = { x: 0.15, y: 0.15, width: 0.7, height: 0.7, angle: -2.5 };
+  const asEdits = [
+    { action: AssetEditAction.Crop, parameters: { x: 900, y: 600, width: 4200, height: 2800 } },
+    { action: AssetEditAction.Rotate, parameters: { angle: -2.5 } },
+  ];
+  const ownCrop = { action: AssetEditAction.Crop, parameters: { x: 0, y: 0, width: 100, height: 100 } } as const;
+  const showing = (stored: typeof placement | null) => ({ getShownPlacement: vitest.fn().mockResolvedValue(stored) });
+
+  it('is the place of the shown edit, as a crop and a turn in the pixels of the photo', async () => {
+    const repository = showing(placement);
+    await expect(shownEdits(repository, 'photo', [], frame)).resolves.toEqual(asEdits);
+    expect(repository.getShownPlacement).toHaveBeenCalledWith('photo');
+  });
+
+  it('is nothing for a photo that shows its own file, or an edit placed like the photo', async () => {
+    await expect(shownEdits(showing(null), 'photo', [], frame)).resolves.toEqual([]);
+    await expect(shownEdits(showing(null), 'photo', null, frame)).resolves.toEqual([]);
+  });
+
+  it('is the photo’s own edits while it has any: they make its picture, and nothing else is asked', async () => {
+    const repository = showing(placement);
+    await expect(shownEdits(repository, 'photo', [ownCrop], frame)).resolves.toEqual([ownCrop]);
+    expect(repository.getShownPlacement).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing for a photo whose size is not known', async () => {
+    const repository = showing(placement);
+    await expect(shownEdits(repository, 'photo', [], { width: 0, height: 0 })).resolves.toEqual([]);
+    expect(repository.getShownPlacement).not.toHaveBeenCalled();
+  });
+
+  it('is Immich’s own behaviour without the fork’s repository', async () => {
+    await expect(shownEdits(undefined, 'photo', [], frame)).resolves.toEqual([]);
+    await expect(shownEdits(undefined, 'photo', [ownCrop], frame)).resolves.toEqual([ownCrop]);
+  });
+
+  describe('the boxes to draw', () => {
+    const inside = box(400);
+    const cutOut = box(-300);
+
+    it('leaves out a box that an edit made elsewhere cut out of the picture', () => {
+      const placed = asEdits as AssetEditActionItem[];
+      expect(inShownPicture([inside, cutOut], [], placed)).toEqual([inside]);
+      expect(inShownPicture([inside, cutOut], null, placed)).toEqual([inside]);
+    });
+
+    it('returns every box of a photo that shows its own file, or that Gallery’s editor has changed', () => {
+      const boxes = [inside, cutOut];
+      expect(inShownPicture(boxes, [], [])).toBe(boxes);
+      expect(inShownPicture(boxes, [ownCrop], [ownCrop])).toBe(boxes);
+    });
+  });
+
+  describe('the photo a box drawn by hand is converted from', () => {
+    const exifInfo = { exifImageWidth: 6000, exifImageHeight: 4000, orientation: '1' };
+    // while it shows the edit, the photo has the edit's resolution
+    const photo = { id: 'photo', width: 2100, height: 1400, edits: [], exifInfo };
+
+    it('has the placement as its edits and the placed part’s own size as its size', async () => {
+      await expect(shownEditAsset(showing(placement), photo)).resolves.toEqual({
+        ...photo,
+        edits: asEdits,
+        width: 4200,
+        height: 2800,
+      });
+    });
+
+    it('is the photo itself when nothing is placed, when it has its own edits, and without its metadata', async () => {
+      await expect(shownEditAsset(showing(null), photo)).resolves.toBe(photo);
+      const cropped = { ...photo, edits: [ownCrop] };
+      await expect(shownEditAsset(showing(placement), cropped)).resolves.toBe(cropped);
+      const unread = { ...photo, exifInfo: null };
+      await expect(shownEditAsset(showing(placement), unread)).resolves.toBe(unread);
+      await expect(shownEditAsset(undefined, photo)).resolves.toBe(photo);
+    });
   });
 });

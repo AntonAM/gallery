@@ -79,7 +79,10 @@
 
   const current = $derived(items[index]);
   const currentActed = $derived(!!current && actedFaceIds.has(current.assetFaceId));
-  const photoUrl = $derived(current ? getAssetMediaUrl({ id: current.assetId, size: AssetMediaSize.Preview }) : '');
+  // the highlighted box is in the pixels of the photo's own picture, so that is the picture shown: not the edited one
+  const photoUrl = $derived(
+    current ? getAssetMediaUrl({ id: current.assetId, size: AssetMediaSize.Preview, edited: false }) : '',
+  );
   // S11.6: the queue is empty — either it started that way or reviewing drained it — and the initial load has
   // settled. `onClose` still fires (unchanged, see advance()/onMount below); this only controls what renders
   // in the instant before/around that.

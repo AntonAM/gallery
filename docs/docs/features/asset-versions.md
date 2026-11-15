@@ -108,8 +108,12 @@ behind it, if it has one (with several, one of them; one that arrives later can 
 Gallery's own editor crops and rotates the photo's own file, not the edit you are looking at, so **a photo that
 shows an edit cannot be cropped or rotated in Gallery**: the editor says so. Colour adjustments still work, and apply
 on top of the edit. A crop made in Gallery before the edit arrived stays what you see until you remove it; then the
-newest edit shows. Face boxes are found on the photo's own file, so on an edit that is cropped or straightened
-differently they can sit in the wrong place.
+newest edit shows.
+
+Faces are found on the photo's own file. When the edit that shows is cropped or straightened, Gallery finds the faces
+again on the edit and moves each box to its face. A person the edit cut out gets no box while the edit shows; the
+photo stays in that person's list. This needs face recognition to be on and at least one face that is on both
+pictures: without that, the boxes stay where they were found on the photo's own file.
 
 ## Seeing versions
 

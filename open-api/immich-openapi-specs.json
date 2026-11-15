@@ -36264,6 +36264,7 @@
           "AssetVersionDetectQueueAll",
           "AssetVersionDetect",
           "AssetVersionCleanup",
+          "AssetVersionPlaceFaces",
           "AssetVersionUndo",
           "AssetEncodeDataSaverVideoQueueAll",
           "AssetEncodeDataSaverVideo",

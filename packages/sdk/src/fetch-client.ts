@@ -12935,6 +12935,7 @@ export enum JobName {
     AssetVersionDetectQueueAll = "AssetVersionDetectQueueAll",
     AssetVersionDetect = "AssetVersionDetect",
     AssetVersionCleanup = "AssetVersionCleanup",
+    AssetVersionPlaceFaces = "AssetVersionPlaceFaces",
     AssetVersionUndo = "AssetVersionUndo",
     AssetEncodeDataSaverVideoQueueAll = "AssetEncodeDataSaverVideoQueueAll",
     AssetEncodeDataSaverVideo = "AssetEncodeDataSaverVideo",

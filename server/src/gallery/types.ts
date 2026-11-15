@@ -159,6 +159,7 @@ export type GalleryJobItem =
   | { name: JobName.AssetVersionDetectQueueAll; data: IBaseJob }
   | { name: JobName.AssetVersionDetect; data: IAssetVersionDetectJob }
   | { name: JobName.AssetVersionCleanup; data: IBaseJob }
+  | { name: JobName.AssetVersionPlaceFaces; data: IEntityJob }
   | { name: JobName.AssetVersionUndo; data: IBaseJob }
 
   // Data Saver video

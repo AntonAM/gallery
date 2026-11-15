@@ -24,5 +24,7 @@ describe('FaceCrop', () => {
     // asset media URL (NOT a person thumbnail) — assert the asset id is in the url
     expect(style).toContain('asset-1');
     expect(style).toContain('background-image');
+    // the box is in the pixels of the photo's own picture, so the face is cut from that one, not from the edited one
+    expect(style).toContain('edited=false');
   });
 });

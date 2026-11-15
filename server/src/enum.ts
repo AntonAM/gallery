@@ -1043,6 +1043,7 @@ export enum JobName {
   AssetVersionDetectQueueAll = 'AssetVersionDetectQueueAll',
   AssetVersionDetect = 'AssetVersionDetect',
   AssetVersionCleanup = 'AssetVersionCleanup',
+  AssetVersionPlaceFaces = 'AssetVersionPlaceFaces',
   AssetVersionUndo = 'AssetVersionUndo',
 
   // Data Saver video

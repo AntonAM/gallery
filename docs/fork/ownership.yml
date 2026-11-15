@@ -212,6 +212,7 @@ features:
       - server/src/queries/asset.version.repository.sql
       - server/test/medium/specs/gallery/asset-version.service.spec.ts
       - server/test/medium/specs/gallery/asset-version-instructions.spec.ts
+      - server/test/medium/specs/gallery/asset-version-place-faces.spec.ts
       - web/src/lib/gallery/versions/**
       - web/src/lib/gallery/admin/AssetVersionsSettings.svelte
       - web/src/lib/gallery/admin/AssetVersionsSettings.spec.ts

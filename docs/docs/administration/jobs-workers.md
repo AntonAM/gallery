@@ -82,4 +82,4 @@ graph TD
 
 [Spatial Scene](/features/spatial-scene) is also disabled by default. It computes a depth map for each photo, and runs again after a photo is cropped or rotated.
 
-[Versions](/features/asset-versions) are disabled by default too. Once enabled, the Versions job runs after metadata extraction of each new or re-read photo, and groups it with the other files of the same shot: its RAW, and its exported edits when those are switched on.
+[Versions](/features/asset-versions) are disabled by default too. Once enabled, the Versions job runs after metadata extraction of each new or re-read photo, and groups it with the other files of the same shot: its RAW, and its exported edits when those are switched on. For a photo that shows a cropped edit, the same queue finds the faces again on the edit, so their boxes sit where the faces are.

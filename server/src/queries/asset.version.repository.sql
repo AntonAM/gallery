@@ -822,6 +822,85 @@ from
 where
   "asset"."id" = $1::uuid
 
+-- AssetVersionRepository.hasLook
+select
+  "versionAssetId"
+from
+  "asset_version"
+where
+  "versionAssetId" = $1::uuid
+  and "role" = $2
+  and "lookUpdatedAt" is not null
+
+-- AssetVersionRepository.getLookForPlacement
+select
+  "asset"."ownerId",
+  "asset"."width",
+  "asset"."height",
+  "exif"."exifImageWidth",
+  "exif"."exifImageHeight",
+  "exif"."orientation",
+  "look"."lookSourceAssetId" as "sourceAssetId",
+  "look"."lookSourceModifiedAt" as "sourceModifiedAt",
+  "look"."placement",
+  "look"."lookUpdatedAt"::text as "revision",
+  "preview"."path" as "previewPath",
+  exists (
+    select
+      1
+    from
+      "asset_edit" "e"
+    where
+      "e"."assetId" = "asset"."id"
+  ) as "hasEditorEdits"
+from
+  "asset_version" as "look"
+  inner join "asset" on "asset"."id" = "look"."versionAssetId"
+  inner join "asset_exif" as "exif" on "exif"."assetId" = "asset"."id"
+  left join "asset_file" as "preview" on "preview"."assetId" = "asset"."id"
+  and "preview"."type" = 'preview'
+  and "preview"."isEdited" = true
+where
+  "look"."versionAssetId" = $1::uuid
+  and "look"."role" = $2
+  and "look"."lookUpdatedAt" is not null
+
+-- AssetVersionRepository.getFacesWithVectors
+select
+  "face"."id",
+  "face"."boundingBoxX1",
+  "face"."boundingBoxY1",
+  "face"."boundingBoxX2",
+  "face"."boundingBoxY2",
+  "face"."imageWidth",
+  "face"."imageHeight",
+  "search"."embedding"
+from
+  "asset_face" as "face"
+  inner join "face_search" as "search" on "search"."faceId" = "face"."id"
+where
+  "face"."assetId" = $1::uuid
+  and "face"."deletedAt" is null
+
+-- AssetVersionRepository.getShownPlacement
+select
+  "look"."placement"
+from
+  "asset_version" as "look"
+where
+  "look"."versionAssetId" = $1::uuid
+  and "look"."role" = $2
+  and "look"."lookUpdatedAt" is not null
+  and "look"."placement" is not null
+  and not exists (
+    select
+      1
+    from
+      "asset_edit" "e"
+    where
+      "e"."assetId" = "look"."versionAssetId"
+  )
+
 -- AssetVersionRepository.getOutdatedLooks
 select
   "base"."versionAssetId" as "assetId"

@@ -41,7 +41,7 @@ import {
 import { requireAssetEditAccess } from 'src/gallery/utils/access-grants.js';
 import { applyAssetResponseOverlay } from 'src/gallery/utils/asset-response-overlay.js';
 import { afterAssetUpdate, beforeAssetUpdate, beforeAssetUpdateAll } from 'src/gallery/utils/asset-update-hooks.js';
-import { requireOwnPicture } from 'src/gallery/utils/asset-version-look.js';
+import { requireOwnPicture, shownEdits } from 'src/gallery/utils/asset-version-look.js';
 import { logCrossOwnerEdit } from 'src/gallery/utils/cross-owner-edit.js';
 import { BaseService } from 'src/services/base.service.js';
 import type { JobItem, JobOf } from 'src/types.js';
@@ -517,7 +517,9 @@ export class AssetService extends BaseService {
       orientation: asset.orientation,
     });
 
-    return ocr.map((item) => transformOcrBoundingBox(item, asset.edits, dimensions));
+    // Gallery: on a photo that shows an edit, the boxes follow it (src/gallery/utils/asset-version-look.ts)
+    const edits = await shownEdits(this.assetVersionRepository, id, asset.edits, dimensions);
+    return ocr.map((item) => transformOcrBoundingBox(item, edits, dimensions));
   }
 
   async upsertBulkMetadata(auth: AuthDto, dto: AssetMetadataBulkUpsertDto): Promise<AssetMetadataBulkResponseDto[]> {

@@ -11,7 +11,9 @@
 
   let { face, label, class: className = '' }: Props = $props();
 
-  const url = $derived(getAssetMediaUrl({ id: face.assetId, size: AssetMediaSize.Preview }));
+  // the box is in the pixels of the photo's own picture, so that is the picture it is cut from: not the edited one
+  // (cropped in the editor, or an edit made elsewhere that the photo shows)
+  const url = $derived(getAssetMediaUrl({ id: face.assetId, size: AssetMediaSize.Preview, edited: false }));
   const transform = $derived(getFaceCropTransform(face));
 </script>
 
